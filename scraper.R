@@ -1,5 +1,4 @@
 library(dplyr);
-library(lubridate);
 library(rvest);
 library(stringr);
 
@@ -67,7 +66,7 @@ rm(me)
 
 # United States
 us_selector <- "#us-zone-1 a, #us-zone-2 a, #us-zone-3 a"
-us <- paste(cnn, "/us", sep = "/") %>% 
+us <- paste(cnn, "us", sep = "/") %>% 
   read_html() %>% 
   html_nodes(us_selector)
 us_data <- data_frame(
@@ -77,6 +76,59 @@ us_data <- data_frame(
 )
 rm(us)
 
-master <- rbind(africa_data, americas_data, asia_data, europe_data, me_data, us_data) %>% 
-  filter(Title != "", str_detect(href, "/index.html")) %>% 
-  mutate(Last.scene.date = floor_date( now("UTC"), unit = "day" ));
+# # General politics
+# # You idiot, you should have figured out how to do this long ago, now you missed all the trump stuff.
+# politics_selector <- "#politics-zone-1 a , #politics-zone-2 a"
+# So for some reason, most of cnn.com/politics is generated dynamically by delayed javascript rendering so I can't
+# exactly use rvest to look into the html structure. Instead I need a headless web-browser to load the url and 
+# "trigger" the js. 
+
+# I'd rather do everything in R with Selenium, but I'm having some difficulties there, so I'm just going to write a  
+# script in PhantomJS and run it through R with system()
+# politics <- paste(cnn, "politics", sep = "/") %>% 
+#   read_html() %>% 
+#   html_nodes(politics_selector)
+# politics_data <- data_frame(
+#   Title  = html_text(politics, TRUE),
+#   href   = html_attr(politics, "href"),
+#   Source = "Politics"
+# )
+
+master <- bind_rows(africa_data, americas_data, asia_data, europe_data, me_data, us_data) %>% 
+  filter(Title != "", grepl("*/index.html", href), !xml2:::is_url(href) )
+
+
+
+scrapeArticle <- function(dta) {
+  url <- paste0(cnn, unique(dta$href))
+  doc <- read_html(url)
+  lt  <- list(
+    content  = html_nodes(doc, ".el__leafmedia--sourced-paragraph .zn-body__paragraph , div.zn-body__paragraph") %>% 
+                  html_text(TRUE) %>% 
+                  paste(collapse = " ") %>% 
+                  sub("^\\(CNN\\)", "", .),
+    author   = html_nodes(doc, ".metadata__byline__author a") %>% 
+                  html_text(TRUE),
+    title    = html_nodes(doc, ".pg-headline") %>% 
+                  html_text(TRUE),
+    subtitle = html_nodes(doc, "#body-text h3") %>% 
+                  html_text(TRUE) %>% 
+                  grep("^JUST WATCHED$|^Story highlights$", ., value = TRUE, invert = TRUE) %>% 
+                  unique(),
+    summary  = html_nodes(doc, ".el__storyhighlights--normal") %>% 
+                  html_text(TRUE) %>% 
+                  paste(collapse = " "),
+    links    = html_nodes(doc, "#body-text a") %>% 
+                  html_attr("href") %>% 
+                  .[!xml2:::is_url(.) & grepl("index\\.html$", .)] %>% 
+                  unique(),
+    date     = html_nodes(doc, ".update-time") %>% 
+                  html_text(TRUE) %>% 
+                  sub("^.*?, ", "", .) %>% 
+                  strptime("%a %B %d, %Y", tz = "America/New_York"),
+    url      = url,
+    source   = unique(dta$Source))
+  lt$alternate_titles <- setdiff( unique(dta$Title), lt$title)
+  rm(doc)
+  return(lt)
+}

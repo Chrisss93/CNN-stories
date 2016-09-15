@@ -1,34 +1,41 @@
 #!/usr/local/bin/Rscript
 
 source("scraper.R")
+library(rmongodb)
 
 if ( Sys.getenv("CNN_STORAGE") == "REMOTE") {
-library(RMySQL);
-db <- dbConnect(MySQL(),
-                 user     = Sys.getenv("MYSQL_CNN_USER"),
-                 password = Sys.getenv("MYSQL_CNN_PASSWORD"),
-                 host     = Sys.getenv("MYSQL_CNN_HOST"),
-                 port     = Sys.getenv("MYSQL_CNN_PORT") %>% as.numeric(),
-                 dbname   = "CNN_Article_Archive")
-sql_select <- 
-"SELECT Title, href, Source FROM Articles 
-WHERE STR_TO_DATE(`Last.scene.date`, '%Y-%m-%d') > CURDATE() - INTERVAL 3 DAY"
-
-recent_stories <- dbGetQuery(db, sql_select)
-new_stories <- anti_join(master, recent_stories, c("Title", "href", "Source"))
-print(paste(nrow(new_stories), "new articles have been scraped from CNN at", lubridate::now()))
-dbWriteTable(conn = db, name = "Articles", value = new_stories, row.names = FALSE, append = TRUE) %>% invisible()
-
+  mongo <- mongo.create(
+    host     = Sys.getenv("MONGO_CNN_HOST"), 
+    username = Sys.getenv("MONGO_CNN_USER"), 
+    password = Sys.getenv("MONGO_CNN_PASSWORD"), 
+    db       = Sys.getenv("MONGO_CNN_DB")
+  )
 } else {
-original <-   read.csv("data/articles.csv", stringsAsFactors = FALSE) %>% 
-  mutate(Last.scene.date = as.POSIXct(Last.scene.date, tz = "UTC"));
-
-new_master <- rbind(original, master) %>% 
-  arrange(desc(Last.scene.date))
-
-repeated_stories <- new_master %>% select(-Last.scene.date) %>% duplicated()
-
-print(paste(nrow(master) - sum(repeated_stories), 
-            "new articles have been scraped from CNN at", lubridate::now()))
-write.csv(new_master[!repeated_stories, ], "data/articles.csv", row.names = FALSE)
+  mongo <- mongo.create(
+    username = Sys.getenv("MONGO_CNN_USER"), 
+    password = Sys.getenv("MONGO_CNN_PASSWORD"), 
+    db       = Sys.getenv("MONGO_CNN_DB")
+  )
 }
+
+`%nin%`      <- Negate(`%in%`)
+recent_time  <- Sys.time() - lubridate::days(10)
+mongo_select <- mongo.bson.buffer.create()
+invisible(mongo.bson.buffer.start.object(mongo_select, "date"))
+invisible(mongo.bson.buffer.append(mongo_select, "$gte", recent_time))
+invisible(mongo.bson.buffer.finish.object(mongo_select))
+
+recent_stories <- mongo.find.all(mongo, 
+                                 paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = "."), 
+                                 query  = mongo.bson.from.buffer(mongo_select), 
+                                 fields = list("_id" = 0, url = 1L)) %>% 
+  unlist(use.names = FALSE)
+
+new_stories <- filter(master, paste0(cnn, href) %nin% recent_stories)
+print(paste(nrow(new_stories), "new articles have been collected from CNN at", Sys.time(), "Scraping now..."))
+
+articles  <- plyr::dlply(new_stories, "href", scrapeArticle)
+bson_list <- lapply(articles, mongo.bson.from.list)
+mongo.insert.batch(mongo, paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = "."), bson_list)
+print("Scraping complete and stored.")
+invisible(mongo.destroy(mongo))

@@ -9,49 +9,6 @@ all_keywords <- read.csv("data/keywords.csv", stringsAsFactors = FALSE);
 key_pattern <- paste0( unique(all_keywords$Keywords), collapse = "| ");
 rm(all_keywords);
 
-
-article_selector <- paste(".zn-body__paragraph",  # Article main body
-                  "#body-text h3",                # Section titles
-                  ".el__storyhighlights--normal", # Article summary
-                  ".pg-headline",                 # Article title
-                  sep = " , ")
-scrapeArticle <- function(dta, selector = article_selector, pattern = key_pattern) {
-  if ( str_detect( unique(dta$href), "http://") ) {
-    url <- unique(dta$href)
-  } else {
-    url <- paste0("http://www.cnn.com", unique(dta$href))
-  }
-  url <- url %>% 
-    read_html() %>% 
-    html_nodes(selector)
-  
-  article     <- html_text(url, TRUE) %>% 
-    paste0(collapse = " ") %>% 
-    str_replace_all("\"|\'s", "")
-  # found_words <- str_extract_all(article, pattern) %>% 
-  #   unlist() %>% 
-  #   str_trim()
-  p_time      <- str_extract( unique(dta$href), "/\\d{4}/\\d{2}/\\d{2}/")
-   # ymd()
-  rm(url)
-  
-  # dta$Publish.time <- ymd(p_time);
-  # dta$Keywords     <- paste(found_words, collapse = "_BREAK_");
-  # dta$Article      <- article
-  data.frame(Publish.time = ymd(p_time), Article = article)
- # return( as_data_frame(dta) )
-  # list(Keywords       = as.data.frame(table(found_words, dnn = "Keywords"), stringsAsFactors = FALSE),
-  #      Publish.time   = p_time,
-  #      Title          = dta$Title[1],
-  #      URL            = unique(dta$href),
-  #      Number.stories = length(dta$href))
-}
-test <- plyr::ddply(master, "href", scrapeArticle)
-
-test <- master %>% rowwise() %>% do(mem_scrape(.)) %>% ungroup()
-
-test <- plyr::dlply(master, "href", scrapeArticle)
-
 drawKeywordConnections <- function(scraped_output, all_keywords, centroids) {
   poly_lines <- scraped_output$Keywords %>% 
     left_join(all_keywords, by = "Keywords") %>% 
