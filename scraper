@@ -1,6 +1,8 @@
 #!/usr/local/bin/Rscript
 
 source("scraper.R")
+
+library(lubridate)
 library(rmongodb)
 
 if ( Sys.getenv("CNN_STORAGE") == "REMOTE") {
@@ -17,17 +19,17 @@ if ( Sys.getenv("CNN_STORAGE") == "REMOTE") {
     db       = Sys.getenv("MONGO_CNN_DB")
   )
 }
+cnn_collection <- paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = ".")
 
 `%nin%`      <- Negate(`%in%`)
-recent_time  <- Sys.time() - lubridate::days(10)
-mongo_select <- mongo.bson.buffer.create()
-invisible(mongo.bson.buffer.start.object(mongo_select, "date"))
-invisible(mongo.bson.buffer.append(mongo_select, "$gte", recent_time))
-invisible(mongo.bson.buffer.finish.object(mongo_select))
+# recent_time  <- Sys.time() - days(10)
+# mongo_select <- mongo.bson.buffer.create()
+# invisible(mongo.bson.buffer.start.object(mongo_select, "date"))
+# invisible(mongo.bson.buffer.append(mongo_select, "$gte", recent_time))
+# invisible(mongo.bson.buffer.finish.object(mongo_select))
 
-recent_stories <- mongo.find.all(mongo, 
-                                 paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = "."), 
-                                 query  = mongo.bson.from.buffer(mongo_select), 
+recent_stories <- mongo.find.all(mongo, cnn_collection,  
+#                                query  = mongo.bson.from.buffer(mongo_select), 
                                  fields = list("_id" = 0, url = 1L)) %>% 
   unlist(use.names = FALSE)
 
@@ -36,6 +38,12 @@ print(paste(nrow(new_stories), "new articles have been collected from CNN at", S
 
 articles  <- plyr::dlply(new_stories, "href", scrapeArticle)
 bson_list <- lapply(articles, mongo.bson.from.list)
-mongo.insert.batch(mongo, paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = "."), bson_list)
-print("Scraping complete and stored.")
-invisible(mongo.destroy(mongo))
+mongo.insert.batch(mongo, cnn_collection, bson_list)
+
+# source("delete_mongo_duplicates.R"")
+if (.Last.value) {
+  print("Scraping complete and stored.")
+} else {
+  print("New articles could not be stored.")
+}
+invisible( mongo.destroy(mongo) )
