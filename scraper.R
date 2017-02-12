@@ -1,103 +1,27 @@
-library(dplyr);
+library(dplyr, warn.conflicts = FALSE);
 library(rvest);
-library(stringr);
+library(text2vec);
 
 cnn <- "http://www.cnn.com"
+sources <- list( c(name = "Africa",      selector = "#africa-zone-2 a, #africa-zone-1 a"), 
+                 c(name = "Americas",    selector = "#americas-zone-2 a, #americas-zone-1 a"),
+                 c(name = "Asia",        selector = "#asia-zone-2 a, #asia-zone-1 a"), 
+                 c(name = "Europe",      selector = "#europe-zone-2 a, #europe-zone-1 a"), 
+                 c(name = "Middle-East", selector = "#middleeast-zone-2 a, #middleeast-zone-1 a"),
+                 c(name = "US",          selector = "#us-zone-1 a, #us-zone-2 a, #us-zone-3 a"))
 
-# Africa
-africa_selector <- "#africa-zone-2 a, #africa-zone-1 a"
-africa <- paste(cnn, "africa", sep = "/") %>% 
-  read_html() %>%
-  html_nodes(africa_selector)
-africa_data <- data_frame(
-  Title  = html_text(africa, TRUE),
-  href   = html_attr(africa, "href"),
-  Source = "Africa"
-)
-rm(africa)
-
-# Americas
-americas_selector <- "#americas-zone-2 a, #americas-zone-1 a"
-americas <- paste(cnn, "americas", sep = "/") %>% 
-  read_html() %>%
-  html_nodes(americas_selector)
-americas_data <- data_frame(
-  Title  = html_text(americas, TRUE),
-  href   = html_attr(americas, "href"),
-  Source = "Americas"
-)
-rm(americas)
-
-# Asia
-asia_selector <- "#asia-zone-2 a, #asia-zone-1 a"
-asia <- paste(cnn, "asia", sep = "/") %>% 
-  read_html() %>%
-  html_nodes(asia_selector)
-asia_data <- data_frame(
-  Title  = html_text(asia, TRUE),
-  href   = html_attr(asia, "href"),
-  Source = "Asia"
-)
-rm(asia)
-
-# Europe
-europe_selector <- "#europe-zone-2 a, #europe-zone-1 a"
-europe <- paste(cnn, "europe", sep = "/") %>% 
-  read_html() %>%
-  html_nodes(europe_selector)
-europe_data <- data_frame(
-  Title  = html_text(europe, TRUE),
-  href   = html_attr(europe, "href"),
-  Source = "Europe"
-)
-rm(europe)
-
-# Middle East
-me_selector <- "#middleeast-zone-2 a, #middleeast-zone-1 a"
-me <- paste(cnn, "middle-east", sep = "/") %>% 
-  read_html() %>%
-  html_nodes(me_selector)
-me_data <- data_frame(
-  Title  = html_text(me, TRUE),
-  href   = html_attr(me, "href"),
-  Source = "Middle East"
-)
-rm(me)
-
-# United States
-us_selector <- "#us-zone-1 a, #us-zone-2 a, #us-zone-3 a"
-us <- paste(cnn, "us", sep = "/") %>% 
-  read_html() %>% 
-  html_nodes(us_selector)
-us_data <- data_frame(
-  Title  = html_text(us, TRUE), 
-  href   = html_attr(us, "href"),
-  Source = "U.S."
-)
-rm(us)
-
-# # General politics
-# # You idiot, you should have figured out how to do this long ago, now you missed all the trump stuff.
-# politics_selector <- "#politics-zone-1 a , #politics-zone-2 a"
-# So for some reason, most of cnn.com/politics is generated dynamically by delayed javascript rendering so I can't
-# exactly use rvest to look into the html structure. Instead I need a headless web-browser to load the url and 
-# "trigger" the js. 
-
-# I'd rather do everything in R with Selenium, but I'm having some difficulties there, so I'm just going to write a  
-# script in PhantomJS and run it through R with system()
-# politics <- paste(cnn, "politics", sep = "/") %>% 
-#   read_html() %>% 
-#   html_nodes(politics_selector)
-# politics_data <- data_frame(
-#   Title  = html_text(politics, TRUE),
-#   href   = html_attr(politics, "href"),
-#   Source = "Politics"
-# )
-
-master <- bind_rows(africa_data, americas_data, asia_data, europe_data, me_data, us_data) %>% 
-  filter(Title != "", grepl("*/index.html", href), !xml2:::is_url(href) )
-
-
+scrapeStories <- function(source) {
+  stories <- paste(cnn, source["name"], sep = "/") %>% 
+    read_html() %>% 
+    html_nodes(source["selector"])
+  
+  stories_d <- data_frame(Title  = html_text(stories, TRUE), 
+                          href   = html_attr(stories, "href"), 
+                          Source = source["name"]) %>% 
+    filter(nchar(Title) > 0, grepl("*/index.html$", href), !xml2:::is_url(href) )
+  stopifnot(nrow(stories_d) >= 5)
+  return(stories_d)
+}
 
 scrapeArticle <- function(dta) {
   url <- paste0(cnn, unique(dta$href))
@@ -127,8 +51,39 @@ scrapeArticle <- function(dta) {
                   sub("^.*?, ", "", .) %>% 
                   strptime("%a %B %d, %Y", tz = "America/New_York"),
     url      = url,
-    source   = unique(dta$Source))
+    source   = first(dta$Source))
   lt$alternate_titles <- setdiff( unique(dta$Title), lt$title)
   rm(doc)
   return(lt)
 }
+
+parseLocations <- function(articles, stopwords = readRDS("stopwords.rds"), keywords = read.csv("data/keywords.csv")) {
+  if ( is.null(names(articles)) ) {
+    names(articles) <- sapply(articles, "[[", "url")
+  }
+  keywords <- gsub(" ", "_", removePunctuation(keywords$Keywords))
+  
+  it <- itoken( sapply(articles, "[[", "content"), removePunctuation, word_tokenizer)
+  vocab <- create_vocabulary(it, c(1L, 3L), stopwords, sep_ngram = "_")
+  dtm <- create_dtm(it, vocab_vectorizer(vocab))
+  idx <- which( dimnames(dtm)[[2]] %in% keywords )
+  dtm <- as.matrix(dtm[, idx])
+  
+  locations <- apply(dtm, 1, function(x) { list("locations" = rep(gsub("_", " ", names(x)), x)) })
+  articles <- Map(c, articles, locations)
+  
+  return(articles)
+}
+
+removePunctuation <- function(x) {
+  x <- gsub("(\\w)-(\\w)", "\\1MYUNIQUEDASHSYMBOL\\2", x)
+  x <- gsub("[[:punct:]]+", "", x)
+  x <- gsub("MYUNIQUEDASHSYMBOL", "-", x, fixed = TRUE)
+  x <- gsub(" +", " ", x)
+  return(x)
+}
+
+
+master   <- plyr::ldply(sources, scrapeStories)
+articles <- plyr::dlply(master, "href", scrapeArticle)
+articles <- parseLocations(articles)

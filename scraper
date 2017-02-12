@@ -1,8 +1,6 @@
 #!/usr/local/bin/Rscript
 
 source("scraper.R")
-
-library(lubridate)
 library(rmongodb)
 
 if ( Sys.getenv("CNN_STORAGE") == "REMOTE") {
@@ -33,17 +31,16 @@ recent_stories <- mongo.find.all(mongo, cnn_collection,
                                  fields = list("_id" = 0, url = 1L)) %>% 
   unlist(use.names = FALSE)
 
-new_stories <- filter(master, paste0(cnn, href) %nin% recent_stories)
+master   <- plyr::ldply(sources, scrapeStories) %>% 
+    filter(paste0(cnn, href) %nin% recent_stories)
 print(paste(nrow(new_stories), "new articles have been collected from CNN at", Sys.time(), "Scraping now..."))
 
-articles  <- plyr::dlply(new_stories, "href", scrapeArticle)
-bson_list <- lapply(articles, mongo.bson.from.list)
-mongo.insert.batch(mongo, cnn_collection, bson_list)
+if (nrow(new_stories) > 0) {
+  articles  <- plyr::dlply(master, "href", scrapeArticle)
+  articles  <- parseLocations(articles)
 
-# source("delete_mongo_duplicates.R"")
-if (.Last.value) {
+  bson_list <- lapply(articles, mongo.bson.from.list)
+  mongo.insert.batch(mongo, cnn_collection, bson_list)
   print("Scraping complete and stored.")
-} else {
-  print("New articles could not be stored.")
 }
 invisible( mongo.destroy(mongo) )
