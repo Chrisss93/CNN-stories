@@ -54,6 +54,7 @@ The app does not call Mongo directly, but uses an API from the rich but outdated
 	schema.currentVersion = 3
 	db.system.version.save(schema)
 	```
+	
 3. Create an admin account with a username and password, here referred to as *admin_username* and *admin_password*
 	```mongo
 	db.addUser( { user: "admin_username",
@@ -62,9 +63,9 @@ The app does not call Mongo directly, but uses an API from the rich but outdated
 	```
 4. Create a single database in mongo for the app to use, here referred to as *app_db*, and a "collection" (SQL equivalent of a table), here referred to as *app_collection* to house the data
 	```mongo
-    use app_db
-    db.createCollection("app_collection")
-    ```
+  use app_db
+  db.createCollection("app_collection")
+	```
 5. Create an account the the app will use, here referred to as *app_username* and *app_password* inside *app_db*
 	```mongo
 	db.addUser( { user: "app_username",
@@ -78,11 +79,11 @@ The app does not call Mongo directly, but uses an API from the rich but outdated
 	security:
       authorization: disabled
 	```
-    with
-    ```
-    security:
+  with
+  	```
+	security:
       authorization: enabled
-    ```
+	```
 9. Exit **insert mode** with `Esq` and write and save `:wq`. Now that we have setup users and passwords, we re-enable authentication so **all** access to the mongo server will require both.
 10. Restart mongo to use this new configuration with: `sudo service mongod restart`.
 
@@ -99,13 +100,13 @@ The app does not call Mongo directly, but uses an API from the rich but outdated
 
 1. Create a R config file, where we will store sensitive info like *app_username*, *app_password*, *app_db* and *PUB_DNS* so that we don't need to actually hard-code this info in our code (which could be viewed by others). `vim .Renviron`
 2. In **insert mode** (with `i`), the file should look something like the following
-    ```
-   APP_USER       = app_username
-   APP_PASSWORD   = app_password
-   APP_HOST       = PUB_DNS
-   APP_DB         = app_db
-   APP_COLLECTION = app_collection
-    ```
+	```
+APP_USER       = app_username
+APP_PASSWORD   = app_password
+APP_HOST       = PUB_DNS
+APP_DB         = app_db
+APP_COLLECTION = app_collection
+	```
     where *app username*, *app password*, *PUB_DNS*, *app_db* and *app_collection* are to be replaced with what you had used earlier
 3. Exit **insert mode** `Esq` and save and quit `:wq`
 

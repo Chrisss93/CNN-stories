@@ -33,9 +33,9 @@ recent_stories <- mongo.find.all(mongo, cnn_collection,
 
 master   <- plyr::ldply(sources, scrapeStories) %>% 
     filter(paste0(cnn, href) %nin% recent_stories)
-print(paste(nrow(new_stories), "new articles have been collected from CNN at", Sys.time(), "Scraping now..."))
+print(paste(nrow(master), "new articles have been collected from CNN at", Sys.time(), "Scraping now..."))
 
-if (nrow(new_stories) > 0) {
+if (nrow(master) > 0) {
   articles  <- plyr::dlply(master, "href", scrapeArticle)
   articles  <- parseLocations(articles)
 

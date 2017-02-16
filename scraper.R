@@ -82,8 +82,3 @@ removePunctuation <- function(x) {
   x <- gsub(" +", " ", x)
   return(x)
 }
-
-
-master   <- plyr::ldply(sources, scrapeStories)
-articles <- plyr::dlply(master, "href", scrapeArticle)
-articles <- parseLocations(articles)
