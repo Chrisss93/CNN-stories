@@ -57,22 +57,88 @@ scrapeArticle <- function(dta) {
   return(lt)
 }
 
-parseLocations <- function(articles, stopwords = readRDS("stopwords.rds"), keywords = read.csv("data/keywords.csv")) {
-  if ( is.null(names(articles)) ) {
-    names(articles) <- sapply(articles, "[[", "url")
-  }
-  keywords <- gsub(" ", "_", removePunctuation(keywords$Keywords))
+parseLocations <- function(articles, stopwords = readRDS("data/stopwords.rds"), 
+                           location_key = readRDS("data/location_key.rds")) {
+  location_key    <- mutate(location_key, Keywords = gsub(" ", "_", removePunctuation(Keywords)))
+  names(articles) <- sapply(articles, "[[", "url")
+  all_text        <- sapply(articles, function(x) { paste(x$content, x$title, x$summary, collapse = " ")})
+  it              <- itoken(all_text, removePunctuation, word_tokenizer)
+  vocab           <- create_vocabulary(it, c(1L, 3L), stopwords, sep_ngram = "_")
+  dtm             <- create_dtm(it, vocab_vectorizer(vocab))
+  idx             <- which(dimnames(dtm)[[2]] %in% location_key$Keywords)
+  dtm             <- as.matrix(dtm[, idx]) 
+  locations       <- apply(dtm, 1, function(x) {as.data.frame(x[x>0], nm = "Freq") %>% 
+      tibble::rownames_to_column("Keywords")}) %>% 
+    bind_rows(.id = "url") %>% 
+    left_join(location_key, "Keywords") %>% 
+    plyr::dlply("url", FindCenter, .progress = "text")
   
-  it <- itoken( sapply(articles, "[[", "content"), removePunctuation, word_tokenizer)
-  vocab <- create_vocabulary(it, c(1L, 3L), stopwords, sep_ngram = "_")
-  dtm <- create_dtm(it, vocab_vectorizer(vocab))
-  idx <- which( dimnames(dtm)[[2]] %in% keywords )
-  dtm <- as.matrix(dtm[, idx])
+  no_key_url      <- setdiff(names(articles), names(locations))
+  no_key_list     <- rep(list(list(lat = NA, lon = NA)), length(no_key_url)) %>% setNames(no_key_url)
+  locations       <- append(locations, no_key_list)[names(articles)]
   
-  locations <- apply(dtm, 1, function(x) { list("locations" = rep(gsub("_", " ", names(x)), x)) })
-  articles <- Map(c, articles, locations)
-  
+  stopifnot(all.equal(names(articles), names(locations)))
+  articles        <- Map(c, articles, locations)
   return(articles)
+}
+
+FindCenter <- function(locs) {
+  center <- locs %>% 
+    group_by(Parent, Location) %>% 
+    summarize(N = sum(Freq), pop = first(pop), lat = first(lat), lon = first(long)) %>% 
+    ungroup() %>% 
+    filter(N == max(N))
+  if (nrow(center) > 1) {
+    # If 2 centers are mentioned the same amount of times
+    center <- centerTieBreak(center, locs)
+  } else if (is.na(center$Parent) & center$Location %in% locs$Parent) {
+    # If the center is a country and has a child city
+    center <- filter(locs, Parent == center$Location) %>%
+      filter(pop == max(pop)) %>% slice(1)
+  }
+  # popup <- a(href = center$url, paste0(strong(center$title), br(), center$summary)) %>% as.character()
+  center_output <- list(lat = center$lat, lon = center$lon)
+  return(center_output)
+}
+
+centerTieBreak <- function(centers, locs) {
+  if (all(is.na(centers$Parent))) {
+    # If all centers are countries
+    centers <- filter(locs, Parent %in% centers$Location) %>% 
+      filter(Freq == max(Freq))
+    if (nrow(centers) == 0) {
+      message("Ambiguous location for article: ", first(locs$url))
+      return(data.frame(Location = NA, lon = NA, lat = NA))
+    } else {
+      centers <- cityTieBreak(centers, locs)
+    }
+  } else if (all(!is.na(centers$Parent))) {
+    # If all centers are cities
+    centers <- cityTieBreak(centers, locs)
+  } else {
+    # If some centers are cities, some are countries
+    centers <- filter(centers, !is.na(Parent))
+    if (nrow(centers) > 1) {
+      centers <- cityTieBreak(centers, locs)
+    }
+  }
+  return(centers)
+}
+
+cityTieBreak <- function(centers, locs) {
+  locs$Parent[is.na(locs$Parent)] <- locs$Location[is.na(locs$Parent)]
+  parent <- locs %>% filter(Parent %in% centers$Parent) %>% 
+    group_by(Parent) %>% 
+    summarize(N = sum(Freq)) %>% 
+    filter(N == max(N))
+  center <- filter(centers, Parent %in% parent$Parent)
+  if (nrow(center) > 1) {
+    # If each center's parents are mentioned an equal amount of times (ie. nrow(parent) > 1)
+    # or if both centers have the same parent (ie. nrow(parent) == 1 & nrow(center) > 1)
+    center <- filter(centers, Parent %in% parent$Parent) %>% 
+      filter(pop == max(pop))
+  }
+  return(center)
 }
 
 removePunctuation <- function(x) {
