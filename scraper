@@ -1,46 +1,26 @@
-#!/usr/local/bin/Rscript
+#!/usr/bin/Rscript
 
-source("scraper.R")
-library(rmongodb)
-
-if ( Sys.getenv("CNN_STORAGE") == "REMOTE") {
-  mongo <- mongo.create(
-    host     = Sys.getenv("MONGO_CNN_HOST"), 
-    username = Sys.getenv("MONGO_CNN_USER"), 
-    password = Sys.getenv("MONGO_CNN_PASSWORD"), 
-    db       = Sys.getenv("MONGO_CNN_DB")
-  )
-} else {
-  mongo <- mongo.create(
-    username = Sys.getenv("MONGO_CNN_USER"), 
-    password = Sys.getenv("MONGO_CNN_PASSWORD"), 
-    db       = Sys.getenv("MONGO_CNN_DB")
-  )
+.Last <- function() {
+  try(mongo.destroy(mongo), silent = TRUE)
 }
-cnn_collection <- paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = ".")
+library(rmongodb, quietly = TRUE)
+library(cnn.stories)
+import::from("plyr", "dlply", "ldply")
 
-`%nin%`      <- Negate(`%in%`)
-# recent_time  <- Sys.time() - days(10)
-# mongo_select <- mongo.bson.buffer.create()
-# invisible(mongo.bson.buffer.start.object(mongo_select, "date"))
-# invisible(mongo.bson.buffer.append(mongo_select, "$gte", recent_time))
-# invisible(mongo.bson.buffer.finish.object(mongo_select))
+mongo      <- mongoConnect()
+ns         <- paste(Sys.getenv("MONGO_CNN_DB"), Sys.getenv("MONGO_CNN_COLLECTION"), sep = ".")
+stories    <- mongo.find.all(mongo, ns, fields = list("_id" = FALSE, url = TRUE))
 
-recent_stories <- mongo.find.all(mongo, cnn_collection,  
-#                                query  = mongo.bson.from.buffer(mongo_select), 
-                                 fields = list("_id" = 0, url = 1L)) %>% 
-  unlist(use.names = FALSE)
-
-master   <- plyr::ldply(sources, scrapeStories) %>% 
-    filter(paste0(cnn, href) %nin% recent_stories)
-print(paste(nrow(master), "new articles have been collected from CNN at", Sys.time(), "Scraping now..."))
+master <- ldply(SOURCES, scrapeStories)
+master <- master[ paste0(CNN, master$href) %nin% unlist(stories, use.names = FALSE), ]
+cat(paste(nrow(master), "new articles have been collected from CNN at", Sys.time(), "Scraping now...\n"))
 
 if (nrow(master) > 0) {
-  articles  <- plyr::dlply(master, "href", scrapeArticle)
+  articles  <- dlply(master, "href", scrapeArticle)
   articles  <- parseLocations(articles)
-
+  articles  <- distributeTopics(articles, mongo)
   bson_list <- lapply(articles, mongo.bson.from.list)
-  mongo.insert.batch(mongo, cnn_collection, bson_list)
-  print("Scraping complete and stored.")
+  mongo.insert.batch(mongo, ns, bson_list)
+  cat("Scraping complete and stored.\n")
 }
 invisible( mongo.destroy(mongo) )

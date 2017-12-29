@@ -1,24 +1,8 @@
 # Notes
 
-## Amazon Web Services
-1. [Create EC2 instance](https://us-west-2.console.aws.amazon.com/ec2/v2/home?region=us-west-2#Instances:sort=monitoring) and launch it (I used a Linux AMI t2.medium). You now have a remote server that will host the app
-2. [Create VPC](https://us-west-2.console.aws.amazon.com/vpc/home?region=us-west-2) for infrastructure to control access to the server
-3. [Create a Security Group](https://us-west-2.console.aws.amazon.com/ec2/v2/home?region=us-west-2#SecurityGroups:sort=groupId) for the created VPC. This is where inbound/outbound traffic to the server will be defined and controlled
-4. Create Inbound Rules in the Security Group using the home IP as the source
-	* SSH connection&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(port 80)
-	* MongoDB connection&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(port 27107)
-	* RStudio server connection&nbsp;&nbsp;&nbsp;(port 8787)
-5. Download the file-key, here referred to as *file-key.pem* for SSH authentication
-6. Hide the file-key with: `chmod  400 file-key.pem`
-7. You can now access the remove server from your PC now that you have (1) the *file-key.pem* file and (2) the Public DNS of your instance, here referred to as *Pub_DNS*. Tunnel into the server with: 
-
-	`ssh -i file-key.pem ec2-user@PUB_DNS`  
-
 ## MongoDB general setup
-While we are tunnelled into the remote server, we need to setup the database infrastructure. 
-
-1. [Install MongoDB](https://docs.mongodb.com/ecosystem/platforms/amazon-ec2/) with `sudo yum install -y mongodb-org`
-2. Open the mongo configuration file with the VIM text editor with: `sudo vim /etc/mongod.conf`. If there is nothing in the file, copy and paste this [default template](https://github.com/mongodb/mongo/blob/master/rpm/mongod.conf).
+1. [Install MongoDB](https://docs.mongodb.com/ecosystem/platforms/amazon-ec2/) with `yum/brew/apt-get install -y mongodb-org`
+2. Open the mongo configuration file with the VIM text editor with: `vim /etc/mongod.conf`. If there is nothing in the file, copy and paste this [default template](https://github.com/mongodb/mongo/blob/master/rpm/mongod.conf).
 3. Press `i` which will start the **insert mode** in the VIM editor. Replace
 	```
 	net:
@@ -39,15 +23,15 @@ While we are tunnelled into the remote server, we need to setup the database inf
       authorization: disabled
 	```
 	
-	The IP `127.0.0.1` only allows local connections to the Mongo database. This is the most secure setup and can be used once the app is all finished and on the server. But while the app is still being made (on your personal work machine) we want to connect to the database remotely. IP `0.0.0.0` will configure Mongo to allow all incoming IP connections.
-4. Press `Esq` to exit **insert** mode, then press `:wq` which will save the changes and quit the editor
+The IP `127.0.0.1` only allows local connections to the Mongo database. This is the most secure setup and can be used once the app is all finished and on the server. But while the app is still being made (on your personal work machine) we want to connect to the database remotely. IP `0.0.0.0` will configure Mongo to allow all incoming IP connections.
+4. Press `Esc` to exit **insert** mode, then press `:wq` which will save the changes and quit the editor
 5. Start the Mongo server in the background with: `mongod -f /etc/mongod.conf`
 
-## MongoDB database setup
+## MongoDB configuration
 The app does not call Mongo directly, but uses an API from the rich but outdated R package: [rmongodb](https://github.com/dselivanov/rmongodb). This package was built to work with Mongo's **MONGODB-CR** authentication protocol. However as of **version 3.0**, Mongo now uses **SCRAM-SHA-1**. Since this package is no longer maintained, we need to [revert our Mongo database to the old authentication](http://stackoverflow.com/questions/31065196/rmongodb-support-for-mongodb-3) to make this work.
 
-1. Start the mongo shell with: `mongo`. We are now in the mongo program.
-2. Write some mongo code to revert to old authentication
+1. Start the mongo shell with: `mongo`.
+2. Revert to old authentication
 	```mongo
 	use admin
 	var schema = db.system.version.findOne({"_id" : "authSchema"})
@@ -84,10 +68,10 @@ The app does not call Mongo directly, but uses an API from the rich but outdated
 	security:
       authorization: enabled
 	```
-9. Exit **insert mode** with `Esq` and write and save `:wq`. Now that we have setup users and passwords, we re-enable authentication so **all** access to the mongo server will require both.
+9. Exit **insert mode** with `Esc` and write and save `:wq`. Now that we have setup users and passwords, we re-enable authentication so **all** access to the mongo server will require authentication.
 10. Restart mongo to use this new configuration with: `sudo service mongod restart`.
 
-## R setup
+## R configuration
 ### Installation and permissions
 
 1. Install R with: `sudo yum install R`
@@ -108,7 +92,7 @@ APP_DB         = app_db
 APP_COLLECTION = app_collection
 	```
     where *app username*, *app password*, *PUB_DNS*, *app_db* and *app_collection* are to be replaced with what you had used earlier
-3. Exit **insert mode** `Esq` and save and quit `:wq`
+3. Exit **insert mode** `Esc` and save and quit `:wq`
 
 This is a verbatim example of how the R code would look using the config file to access Mongo.
 ```r
@@ -126,18 +110,18 @@ Where all of this is run as-is, verbatim, without replacing anything. This code 
 ### Rscript executable
 We need to write R code (such as scraping) into a script that can be run outside of R, here referred to as *app_script*. 
 
-1. Create text file `vim app_script` and enter **insert mode** (`i`). The file should like this:
+1. Create text file `vim app_script` and enter **insert mode** (`i`). The file should look something like this:
     ```
     #!/usr/lib64/R/bin/Rscript
     
     [R code goes here]
     ```
-    Now `Esq` then `:wq` to exit **insert mode** and saving and quitting. 
+    Now `Esc` then `:wq` to exit **insert mode** and saving and quitting. 
 2. Make the file an executable: `chmod u+x app_script`
 3. This file can be executed with: `./app_script`
 4. Now, we want the server to automatically execute this file at regular intervals instead of having to manual execute the file using chron scheduling: `chrontab -e` to open the vim editor. Your file should look something like this
     ```
     00 12,18 * * * /home/ec2-user/app_script
     ```
-    This will run *app_script* at the top of the hour, at 12PM and 6PM, every day, every month, every day of week. More info on crontab formatting [here](https://crontab.guru/)
-5. `Esq` and `:wq`. The program *app_script* is now scheduled according to crontab. 
+    This will run *app_script* at the top of the hour, at 12PM and 6PM, every day, every month, every day of  week. More info on crontab formatting [here](https://crontab.guru/)
+5. `Esc` and `:wq`. The program *app_script* is now scheduled according to crontab. 
